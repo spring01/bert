@@ -593,10 +593,10 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
   output_weights = tf.get_variable(
       "output_weights", [num_labels, hidden_size],
-      initializer=tf.truncated_normal_initializer(stddev=0.02))
+      initializer=tf.truncated_normal_initializer(stddev=0.02), dtype=tf.float16)
 
   output_bias = tf.get_variable(
-      "output_bias", [num_labels], initializer=tf.zeros_initializer())
+      "output_bias", [num_labels], initializer=tf.zeros_initializer(), dtype=tf.float16)
 
   with tf.variable_scope("loss"):
     if is_training:
@@ -608,7 +608,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     probabilities = tf.nn.softmax(logits, axis=-1)
     log_probs = tf.nn.log_softmax(logits, axis=-1)
 
-    one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
+    one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float16)
 
     per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
     loss = tf.reduce_mean(per_example_loss)
@@ -634,9 +634,9 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     label_ids = features["label_ids"]
     is_real_example = None
     if "is_real_example" in features:
-      is_real_example = tf.cast(features["is_real_example"], dtype=tf.float32)
+      is_real_example = tf.cast(features["is_real_example"], dtype=tf.float16)
     else:
-      is_real_example = tf.ones(tf.shape(label_ids), dtype=tf.float32)
+      is_real_example = tf.ones(tf.shape(label_ids), dtype=tf.float16)
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
@@ -658,7 +658,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
         scaffold_fn = tpu_scaffold
       else:
-        tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
+        # ~ tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
+        pass
 
     tf.logging.info("**** Trainable Variables ****")
     for var in tvars:
@@ -878,6 +879,13 @@ def main(_):
         is_training=True,
         drop_remainder=True)
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
+  # ~ import numpy as np
+  # ~ np_weights_dict = {}
+  # ~ np_weights_name_list = [name for name in estimator.get_variable_names() if 'layer_8/attention' in name and 'adam' not in name]
+  # ~ for name in np_weights_name_list:
+      # ~ np_weights_dict[name] = estimator.get_variable_value(name)
+  # ~ import pdb; pdb.set_trace()
+  # ~ np.savez('bert_l8_att_weights.npz', **np_weights_dict)
 
   if FLAGS.do_eval:
     eval_examples = processor.get_dev_examples(FLAGS.data_dir)
@@ -916,7 +924,11 @@ def main(_):
         is_training=False,
         drop_remainder=eval_drop_remainder)
 
+    import time
+    start = time.time()
     result = estimator.evaluate(input_fn=eval_input_fn, steps=eval_steps)
+    tf.logging.info('HCHCHC: took {} seconds'.format(time.time() - start))
+    # ~ tf.logging.info('HCHCHC: {}'.format(estimator.__file__))
 
     output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
     with tf.gfile.GFile(output_eval_file, "w") as writer:
